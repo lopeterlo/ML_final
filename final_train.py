@@ -20,10 +20,14 @@ from torchvision import datasets, models, transforms
 from transformers import BertForSequenceClassification
 from transformers import BertModel, BertTokenizer
 
-pre_trained_model_name = 'bert-base-uncased'
+pre_trained_model_name = 'bert-large-uncased'
 num_epochs = 5
 batch_size = 8
 lr = 1e-5
+device = 0
+
+
+model_name = f'bert_model_{lr}_{num_epochs}_F3_lower'
 
 
 
@@ -111,6 +115,7 @@ class bert_model():
         NUM_LABELS = 2
 
         model = BertForSequenceClassification.from_pretrained(PRETRAINED_MODEL_NAME, num_labels=NUM_LABELS)
+        # model = BertForNextSentencePrediction.from_pretrained(PRETRAINED_MODEL_NAME)
         # if require_grad:
         #     for param in model.parameters():
         #         param.requires_grad = True
@@ -120,19 +125,19 @@ class bert_model():
         valloader = DataLoader(self.valset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
         
         if self.gpu:
-            model = model.cuda()
+            model = model.cuda(device)
         for epo in range(self.epoch):
             total = 0
             total_loss = 0
             for data in trainloader:
                 if self.gpu:
                     tokens_tensors, segments_tensors, \
-                    masks_tensors, labels = [x.type(torch.LongTensor).cuda() for x in data]
+                    masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
-#    (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
+   # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
 #    count += self.accu(preds_label, y)
                 loss = outputs [0]
                 loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
@@ -145,6 +150,8 @@ class bert_model():
             self.loss_list.append(total_loss / total)
             print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {self.loss_list[epo]}', end = ',')
 
+            torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
+
             model.eval()
             count = 0
             total = 0
@@ -152,7 +159,7 @@ class bert_model():
             with torch.no_grad():
                 for data in valloader:
                     if self.gpu:
-                        tokens_tensors, segments_tensors, masks_tensors, labels = [x.type(torch.LongTensor).cuda() for x in data]
+                        tokens_tensors, segments_tensors, masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
                     else:
                         tokens_tensors, segments_tensors, masks_tensors, labels = [x for x in data]
                     outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
@@ -188,7 +195,7 @@ class bert_model():
     
     def forward(self, x):
         out = Func.softmax(x, dim=1) # along rows
-        return out[0][1]
+        return out[0][1].tolist()
 
     
     def predict(self, test_data):
@@ -198,7 +205,7 @@ class bert_model():
         count = 0 
         for x in testloader:
             if self.gpu:
-                tokens_tensors, segments_tensors, masks_tensors, _ = [i.cuda() if i is not None else i for i in x ]
+                tokens_tensors, segments_tensors, masks_tensors, _ = [i.cuda(device) if i is not None else i for i in x ]
             else:
                 tokens_tensors, segments_tensors, masks_tensors, _= [i for i in x]
             outputs = self.model(input_ids=tokens_tensors, 
@@ -207,8 +214,11 @@ class bert_model():
 #             (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
 
             ans.append(self.forward(outputs[0]))
-            # print(f'count : {count}', end = ',')
+            # ans.append(outputs[0].tolist()[0][1])
+            count+=1
+            print(f'count : {count}', end = '\r')
         return ans
+       
        
 
 def main(argv, arc):
@@ -225,7 +235,7 @@ def main(argv, arc):
     valset = DialogueDataset(val_df, 'train', tokenizer = tokenizer)
     model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr, valset = valset)
     model.fit_and_train(trainset, require_grad = True)
-    with open('./model/bert_model_test.pkl', 'wb') as output:
+    with open(f'./model/{model_name}', 'wb') as output:
         pickle.dump(model, output)
 
 if __name__ == '__main__':

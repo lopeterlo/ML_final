@@ -20,10 +20,14 @@ from torchvision import datasets, models, transforms
 from transformers import BertForSequenceClassification
 from transformers import BertModel, BertTokenizer
 
-pre_trained_model_name = 'bert-base-uncased'
+# pre_trained_model_name = 'bert-base-uncased'
+pre_trained_model_name = 'bert-large-uncased'
 num_epochs = 3
-batch_size = 16
+batch_size = 1
 lr = 1e-4
+
+model_name = 'bert_model_1e-05_5_F3_large.pkl'
+device = 1
 
 
 
@@ -77,6 +81,7 @@ class bert_model():
         self.model = None
         self.gpu = torch.cuda.is_available()
 
+
     def create_mini_batch(self, samples):
         tokens_tensors = [s[0] for s in samples]
         segments_tensors = [s[1] for s in samples]
@@ -117,14 +122,14 @@ class bert_model():
         valloader = DataLoader(self.valset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
         
         if self.gpu:
-            model = model.cuda()
+            model = model.cuda(device)
         for epo in range(self.epoch):
             total = 0
             total_loss = 0
             for data in trainloader:
                 if self.gpu:
                     tokens_tensors, segments_tensors, \
-                    masks_tensors, labels = [x.type(torch.LongTensor).cuda() for x in data]
+                    masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
@@ -149,7 +154,7 @@ class bert_model():
             with torch.no_grad():
                 for data in valloader:
                     if self.gpu:
-                        tokens_tensors, segments_tensors, masks_tensors, labels = [x.type(torch.LongTensor).cuda() for x in data]
+                        tokens_tensors, segments_tensors, masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
                     else:
                         tokens_tensors, segments_tensors, masks_tensors, labels = [x for x in data]
                     outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
@@ -184,12 +189,14 @@ class bert_model():
     
     def predict(self, test_data):
         ans = []
+        if self.gpu:
+            self.model = self.model.cuda(device)
         self.model.eval()
         testloader = DataLoader(test_data, batch_size=1, collate_fn=self.create_mini_batch)
         count = 0 
         for x in testloader:
             if self.gpu:
-                tokens_tensors, segments_tensors, masks_tensors, _ = [i.cuda() if i is not None else i for i in x ]
+                tokens_tensors, segments_tensors, masks_tensors, _ = [i.cuda(device) if i is not None else i for i in x ]
             else:
                 tokens_tensors, segments_tensors, masks_tensors, _= [i for i in x]
             outputs = self.model(input_ids=tokens_tensors, 
@@ -216,8 +223,18 @@ def main(argv, arc):
     tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name)
     testset = DialogueDataset(test_df, 'test', tokenizer=tokenizer)
 
-    with open('./model/bert_model_test.pkl', 'rb') as input_model:
+
+    # first way
+    with open(f'./model/{model_name}', 'rb') as input_model:
         model = pickle.load(input_model)
+
+    # second way
+    # NUM_LABELS = 2
+    # PRETRAINED_MODEL_NAME = "bert-base-uncased"
+    # model = bert_model()
+    # model.model = BertForSequenceClassification.from_pretrained(PRETRAINED_MODEL_NAME, num_labels=NUM_LABELS)
+    # model.model.load_state_dict(torch.load('./model/bert_model_1e-05_10_F1_v2.pkl'))
+
 
     preds = model.predict(testset)
     test_df['prob'] = preds
@@ -231,7 +248,7 @@ def main(argv, arc):
 
     pred_df = pd.DataFrame()
     # pred_df['id'] = [f'{i}' for i in range(80000,82000)]
-    pred_df['id'] = [f'{i}' for i in range(0,len(ans))]
+    pred_df['id'] = [f'{80000 + i}' for i in range(0, len(ans))]
     # pred_df['id'] = [82000]
     pred_df['candidate-id'] = ans
     pred_df.to_csv(output_path, index = False)
