@@ -6,7 +6,21 @@ import random
 import pickle
 import math
 
+False_num = 1
 special_token = "['-\.\!\/_,$%^*()+\"\<>?:-=]+|[+——！，。？?、~@#￥%……&*（）]+"
+
+def check_length(A, B, right_answer = False):
+    if right_answer:
+        length = len(B)
+        # A = A[-(512 - length):]
+        A_list = A[-100:]
+    else:
+        A_list = []
+        for i in range(len(B)):
+            length = len(B[i])
+            # A_list.append(A[-(512 - length):])
+            A_list.append(A[-100:])
+    return A_list, B
 
 def preprocessing(category = 'train'):
     df = pd.read_json(f'./data/{category}.json')
@@ -18,26 +32,25 @@ def preprocessing(category = 'train'):
         utterance_mapping = dict()
         ## previous dialogue
         length = len(exp['messages-so-far'])
-        data = list(map(lambda x : re.sub(special_token, "",x['utterance']), list(exp['messages-so-far'])))
+        data = list(map(lambda x : re.sub(special_token, " ",x['utterance']), list(exp['messages-so-far'])))
         A = ''
         for i in range(len(data)):
             A += data[i].lower()
         ## answer part and answers mapping
         utterance_mapping[exp['options-for-correct-answers'][0]['utterance']] = exp['options-for-correct-answers'][0]['candidate-id']
-        answer_data = re.sub(special_token, "", exp['options-for-correct-answers'][0]['utterance'])
+        answer_data = re.sub(special_token, " ", exp['options-for-correct-answers'][0]['utterance'])
 
-        if len(A)> 512:
-            A = A[-512:]
+        A_true, answer_data = check_length(A, answer_data, right_answer = True)
 
-        input_df['A'] = [A]
+        input_df['A'] = [A_true]
         input_df['B'] = [answer_data.lower()]
         input_df['label'] = [1]
-        print('finished previous dialogue ', end = ',')
+        # print('finished previous dialogue ', end = ',')
 
         correct_index = list(map(lambda x:  1 if x['candidate-id'] == exp['options-for-correct-answers'][0]['candidate-id'] else 0, exp['options-for-next']))
         correct_index = correct_index.index(1) 
         # False Label
-        false_example_num = 3
+        false_example_num = False_num
         size = len(exp['options-for-next'])
         # print(size)
         index = [k for k in range(size)]
@@ -49,17 +62,20 @@ def preprocessing(category = 'train'):
         for i in index:
             false_sentence.append(exp['options-for-next'][i]['utterance'])
         
-        false_sentence = list(map(lambda x : (re.sub(special_token, "",x)).lower(), false_sentence))
+        false_sentence = list(map(lambda x : (re.sub(special_token, " ",x)).lower(), false_sentence))
+
+        A_false, false_sentence = check_length(A, false_sentence)
+
         wrong_answer = pd.DataFrame()
-        wrong_answer['A'] = [A for i in range(false_example_num)]
+        wrong_answer['A'] = A_false 
         wrong_answer['B'] = false_sentence
         wrong_answer['label'] = [0 for i in range(false_example_num)]
         input_df = input_df.append(wrong_answer).reset_index(drop= True)
         input_df = input_df.replace({'': np.nan}).reset_index(drop = True)
         input_df = input_df.dropna().reset_index(drop= True)
         all_df = all_df.append(input_df).reset_index(drop= True)
-        print(f'finished {j} loop / {len(df)}')
-    all_df.to_csv(f'{category}_df_f{false_example_num}_lower.csv')
+        print(f'finished {j}  / {len(df)} loop', '\r')
+    all_df.to_csv(f'./struc_data/{category}_df_f{false_example_num}_lower_new.csv')
 
 
 def preprocessing_test(category = 'test'):
@@ -72,41 +88,39 @@ def preprocessing_test(category = 'test'):
         utterance_mapping = dict()
         ## previous dialogue
         length = len(exp['messages-so-far'])
-        data = list(map(lambda x : re.sub(special_token, "",x['utterance']), list(exp['messages-so-far'])))
+        data = list(map(lambda x : re.sub(special_token, " ",x['utterance']), list(exp['messages-so-far'])))
         A = ''
         for i in range(len(data)):
             A += data[i].lower()
-        if len(A)> 512:
-            A = A[-512:]
-        input_df['A'] = [A for i in range(100)]
+        
 
         ## candidate Label
         candidate_id = list(map(lambda x : x['candidate-id'], list(exp['options-for-next'])))
         input_df['candidate_id'] = candidate_id
         
-        candidate = list(map(lambda x : (re.sub(special_token, "",x['utterance'])).lower(), list(exp['options-for-next'])))
-        size = len(candidate)
-        B = list()
-        for i in range(size):
-            B.append(candidate[i])
+        B = list(map(lambda x : (re.sub(special_token, " ",x['utterance'])).lower(), list(exp['options-for-next'])))
+
+        A, B = check_length(A, B)
+
 
         input_df['B'] = B
-        
+        input_df['A'] = A
+
         ## question order
         input_df['question'] = [j for i in range(100)]
         if category == 'valid':
-            input_df['ans'] = [exp['options-for-correct-answers'][0]['utterance'] for i in range(len(input_df))]
+            input_df['ans'] = [exp['options-for-correct-answers'][0]['candidate-id'] for i in range(len(input_df))]
 
         input_df = input_df.replace({'': np.nan}).reset_index(drop = True)
         input_df = input_df.dropna().reset_index(drop= True)
         test_df = test_df.append(input_df).reset_index(drop= True)
-        print(f'finished {j} loop / {len(test)}')
-    test_df.to_csv(f'{category}_df_lower.csv', index = False)
+        print(f'finished {j} / {len(test)} loop ', end = '\r')
+    test_df.to_csv(f'./struc_data/{category}_df_lower_new.csv', index = False)
 
 def main(argv, arc):
-    preprocessing('train')
-    # preprocessing_test('valid')
-    preprocessing_test('test')
+    # preprocessing('train')
+    preprocessing_test('valid')
+    # preprocessing_test('test')
 
 if __name__ == '__main__':
     main(sys.argv, len(sys.argv))

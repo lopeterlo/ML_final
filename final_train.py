@@ -20,8 +20,8 @@ from torchvision import datasets, models, transforms
 from transformers import BertForSequenceClassification
 from transformers import BertModel, BertTokenizer
 
-pre_trained_model_name = 'bert-large-uncased'
-num_epochs = 5
+pre_trained_model_name = 'bert-base-uncased'
+num_epochs = 25
 batch_size = 8
 lr = 1e-5
 device = 0
@@ -33,7 +33,7 @@ model_name = f'bert_model_{lr}_{num_epochs}_F3_lower'
 
 
 class DialogueDataset(Dataset):
-    def __init__(self, df, mode, tokenizer):
+    def __init__(self, df, mode , tokenizer):
         assert mode in ["train", "test"]  # 一般訓練你會需要 dev set
         self.mode = mode
         self.df = df
@@ -81,7 +81,6 @@ class bert_model():
         self.val_accu_list = []
         self.lr = lr
         self.model = None
-        self.valset = valset
         self.gpu = torch.cuda.is_available()
 
     def create_mini_batch(self, samples):
@@ -110,20 +109,26 @@ class bert_model():
         return tokens_tensors, segments_tensors, masks_tensors, label_ids
         
     
-    def fit_and_train(self, trainset, require_grad):
-        PRETRAINED_MODEL_NAME = "bert-base-uncased"
-        NUM_LABELS = 2
+    def fit_and_train(self, train_df, val_df, require_grad):
 
-        model = BertForSequenceClassification.from_pretrained(PRETRAINED_MODEL_NAME, num_labels=NUM_LABELS)
+        NUM_LABELS = 2
+        max_value = 0
+        tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name)
+       
+        trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
+        trainloader = DataLoader(trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
+
+        val_batch_size = 5
+        valset = DialogueDataset(val_df, 'test', tokenizer = tokenizer)
+        valloader = DataLoader(valset, batch_size=val_batch_size, collate_fn=self.create_mini_batch)
+        
+        model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
         # model = BertForNextSentencePrediction.from_pretrained(PRETRAINED_MODEL_NAME)
         # if require_grad:
-        #     for param in model.parameters():
-        #         param.requires_grad = True
+        #   for param in model.parameters():
+        #      param.requires_grad = True
         model.train()
-        
-        trainloader = DataLoader(trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
-        valloader = DataLoader(self.valset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
-        
+
         if self.gpu:
             model = model.cuda(device)
         for epo in range(self.epoch):
@@ -138,7 +143,7 @@ class bert_model():
                     masks_tensors, labels = [x for x in data]
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
    # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-#    count += self.accu(preds_label, y)
+#   count += self.accu(preds_label, y)
                 loss = outputs [0]
                 loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
                 opt = torch.optim.Adam(model.parameters(), lr = self.lr)
@@ -150,29 +155,46 @@ class bert_model():
             self.loss_list.append(total_loss / total)
             print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {self.loss_list[epo]}', end = ',')
 
-            torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
+            
 
             model.eval()
-            count = 0
-            total = 0
-            total_loss = 0
+            numebr = 0
+
+            ans = []
             with torch.no_grad():
                 for data in valloader:
                     if self.gpu:
-                        tokens_tensors, segments_tensors, masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
+                        tokens_tensors, segments_tensors, masks_tensors, _ = [x.type(torch.LongTensor).cuda(device) if x is not None else None for x in data]
                     else:
-                        tokens_tensors, segments_tensors, masks_tensors, labels = [x for x in data]
-                    outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
-                    #    (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-                    preds_label = self.softmax(outputs[1]).flatten()
-                    count += self.accu(preds_label, labels)
-                    total += len(tokens_tensors)
-                    total_loss += loss.item() * len(tokens_tensors)
-                val_accu = count / total
+                        tokens_tensors, segments_tensors, masks_tensors, _ = [x for x in data]
+                    outputs = model(input_ids=tokens_tensors, 
+                            token_type_ids=segments_tensors, 
+                            attention_mask=masks_tensors,)
+        #        (tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))   
+                    values = outputs[0].data[:,1].tolist()
+                    ans += values
+                    print(f'count : {numebr}', end = '\r')
+                    numebr += val_batch_size
+
+                count = 0
+                val_len = 0
+                val_df['prob'] = ans
+                groups = val_df.groupby('question')
+                for index, data in groups:
+                    val_len += 1
+                    if 'candidate_id' in val_df.columns:
+                        pred_id = data.loc[data['prob'].idxmax(),'candidate_id']
+                        if data.loc[data['prob'].idxmax(),'ans'] == pred_id:
+                            count += 1
+
+
+                val_accu = count / val_len
+                if val_accu >= max_value:
+                    self.model = model
+                    torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
                 self.val_accu_list.append(val_accu)
-                self.val_loss_list.append(total_loss / total)
-            print(f'Epoch : {epo+1}/{self.epoch} , Validation Loss : {self.val_loss_list[epo]}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
-        self.model = model
+
+                print(f'Epoch : {epo+1}/{self.epoch}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
     
     def accu(self, pred, y):
         ret = 0
@@ -199,9 +221,12 @@ class bert_model():
 
     
     def predict(self, test_data):
+        test_batch_size = 1
         ans = []
+        if self.gpu:
+            self.model = self.model.cuda(device)
         self.model.eval()
-        testloader = DataLoader(test_data, batch_size=1, collate_fn=self.create_mini_batch)
+        testloader = DataLoader(test_data, batch_size=test_batch_size, collate_fn=self.create_mini_batch)
         count = 0 
         for x in testloader:
             if self.gpu:
@@ -211,11 +236,15 @@ class bert_model():
             outputs = self.model(input_ids=tokens_tensors, 
                     token_type_ids=segments_tensors, 
                     attention_mask=masks_tensors,)
-#             (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-
-            ans.append(self.forward(outputs[0]))
+#        (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
+            # first method -> batch >1
+            #        (tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))   
+            values = outputs[0].data[:,1].tolist()
+            ans += values
+            # second method
+            # ans.append(self.forward(outputs[0]))
             # ans.append(outputs[0].tolist()[0][1])
-            count+=1
+            count+= test_batch_size
             print(f'count : {count}', end = '\r')
         return ans
        
@@ -223,18 +252,18 @@ class bert_model():
 
 def main(argv, arc):
     train_path = argv[1]
-    
-    train_df = pd.read_csv(train_path, dtype = {'A': 'str', 'B':'str'})
-    train_df = train_df.drop(['Unnamed: 0'], axis =1)
-
     val_path = argv[2]
-    val_df = pd.read_csv(train_path, dtype = {'A': 'str', 'B':'str'})
-    val_df = val_df.drop(['Unnamed: 0'], axis =1)
-    tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name)
-    trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
-    valset = DialogueDataset(val_df, 'train', tokenizer = tokenizer)
-    model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr, valset = valset)
-    model.fit_and_train(trainset, require_grad = True)
+
+    train_df = pd.read_csv(train_path, dtype = {'A': 'str', 'B':'str'})
+    if 'Unnamed: 0' in train_df.columns:
+        train_df = train_df.drop(['Unnamed: 0'], axis =1)
+    
+    val_df = pd.read_csv(val_path, dtype = {'A': 'str', 'B':'str'})
+    if 'Unnamed: 0' in val_df.columns:
+        val_df = val_df.drop(['Unnamed: 0'], axis =1)
+
+    model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr)
+    model.fit_and_train(train_df, val_df,require_grad = True)
     with open(f'./model/{model_name}', 'wb') as output:
         pickle.dump(model, output)
 
