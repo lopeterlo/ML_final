@@ -27,7 +27,7 @@ lr = 1e-5
 device = 0
 
 
-model_name = f'bert_model_{lr}_{num_epochs}_F3_lower'
+model_name = f'bert_model_{lr}_{num_epochs}_F3_lower_1214'
 
 
 
@@ -192,6 +192,7 @@ class bert_model():
 
                 val_accu = count / val_len
                 if val_accu >= max_value:
+                    max_value = val_accu
                     self.model = model
                     torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
                 self.val_accu_list.append(val_accu)
@@ -268,7 +269,7 @@ def main(argv, arc):
 
     model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr)
     model.fit_and_train(train_df, val_df,require_grad = True)
-    with open(f'./model/{model_name}', 'wb') as output:
+    with open(f'./model/{model_name}_last_epo', 'wb') as output:
         pickle.dump(model, output)
 
 if __name__ == '__main__':
