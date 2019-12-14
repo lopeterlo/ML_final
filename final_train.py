@@ -21,7 +21,7 @@ from transformers import BertForSequenceClassification
 from transformers import BertModel, BertTokenizer
 
 pre_trained_model_name = 'bert-base-uncased'
-num_epochs = 25
+num_epochs = 15
 batch_size = 8
 lr = 1e-5
 device = 0
@@ -155,7 +155,9 @@ class bert_model():
             self.loss_list.append(total_loss / total)
             print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {self.loss_list[epo]}', end = ',')
 
-            
+            with open ('./train_loss.txt', 'w') as f:
+                for i in self.loss_list:
+                    f.write(str(i)+ '\n')
 
             model.eval()
             numebr = 0
@@ -195,7 +197,9 @@ class bert_model():
                 self.val_accu_list.append(val_accu)
 
                 print(f'Epoch : {epo+1}/{self.epoch}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
-    
+                with open ('./val_accu.txt', 'w') as f:
+                    for i in self.val_accu_list:
+                        f.write(str(i)+ '\n')
     def accu(self, pred, y):
         ret = 0
         for i in range(len(pred)):
