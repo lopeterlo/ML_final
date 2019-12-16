@@ -17,17 +17,21 @@ import torchvision
 from torchvision import datasets, models, transforms
 
 
-from transformers import BertForSequenceClassification
-from transformers import BertModel, BertTokenizer
+from transformers import BertForSequenceClassification, BertForNextSentencePrediction
+from transformers import BertModel, BertTokenizer, AdamW
+from transformers import WarmupLinearSchedule as get_linear_schedule_with_warmup
+
 
 pre_trained_model_name = 'bert-base-uncased'
-num_epochs = 15
-batch_size = 8
+num_epochs = 10
+batch_size = 16
 lr = 1e-5
-device = 0
+device = 1
 
+model_type = 'SC_adamw'
 
-model_name = f'bert_model_{lr}_{num_epochs}_F3_lower_1214'
+model_name = f'bert_model_{lr}_{num_epochs}_F3_lower_1216_{model_type}_{lr}'
+
 
 
 
@@ -113,16 +117,19 @@ class bert_model():
 
         NUM_LABELS = 2
         max_value = 0
-        tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name)
+        val_batch_size = 10
+
+        tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name, do_lower_case=True)
        
         trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
         trainloader = DataLoader(trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
 
-        val_batch_size = 5
+        
         valset = DialogueDataset(val_df, 'test', tokenizer = tokenizer)
         valloader = DataLoader(valset, batch_size=val_batch_size, collate_fn=self.create_mini_batch)
         
         model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
+        # model = BertForNextSentencePrediction.from_pretrained(pre_trained_model_name)
         # model = BertForNextSentencePrediction.from_pretrained(PRETRAINED_MODEL_NAME)
         # if require_grad:
         #   for param in model.parameters():
@@ -134,6 +141,18 @@ class bert_model():
         for epo in range(self.epoch):
             total = 0
             total_loss = 0
+            
+            optimizer = AdamW(model.parameters(),
+                  lr = self.lr, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
+                )
+
+            # Total number of training steps is number of batches * number of epochs.
+            total_steps = len(trainloader) * self.epoch
+
+            # Create the learning rate scheduler.
+            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 0, t_total = total_steps)
+
             for data in trainloader:
                 if self.gpu:
                     tokens_tensors, segments_tensors, \
@@ -143,19 +162,47 @@ class bert_model():
                     masks_tensors, labels = [x for x in data]
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
    # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-#   count += self.accu(preds_label, y)
+
                 loss = outputs [0]
                 loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
-                opt = torch.optim.Adam(model.parameters(), lr = self.lr)
-                opt.step() #update parameter
-                opt.zero_grad()
+                # opt = torch.optim.Adam(model.parameters(), lr = self.lr)
+                # opt = torch.optim.SGD(model.parameters(), lr=self.lr, momentum=0.9)
+                # opt.step() #update parameter
+                # opt.zero_grad()
+
+                # Clip the norm of the gradients to 1.0.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                # Update parameters and take a step using the computed gradient
+                optimizer.step()
+
+                # Update the learning rate.
+                scheduler.step()
+
+                # Clear out the gradients (by default they accumulate)
+                model.zero_grad()
+
+
                 total += len(tokens_tensors)
                 total_loss += loss.item() * len(tokens_tensors)
+
+                # outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors)
+                # loss_f = nn.CrossEntropyLoss()
+                # loss = loss_f(outputs[0], labels)
+                # loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
+                # opt = torch.optim.Adam(model.parameters(), lr = self.lr)
+                # opt.step() #update parameter
+                # opt.zero_grad()
+                # total += len(tokens_tensors)
+                # total_loss += loss.item() * len(tokens_tensors)
+
+                del data, tokens_tensors, segments_tensors, \
+                    masks_tensors, labels
+
                 print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {loss}', end = '\r')
             self.loss_list.append(total_loss / total)
             print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {self.loss_list[epo]}', end = ',')
 
-            with open ('./train_loss.txt', 'w') as f:
+            with open (f'./train_loss_{model_type}.txt', 'w') as f:
                 for i in self.loss_list:
                     f.write(str(i)+ '\n')
 
@@ -198,7 +245,7 @@ class bert_model():
                 self.val_accu_list.append(val_accu)
 
                 print(f'Epoch : {epo+1}/{self.epoch}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
-                with open ('./val_accu.txt', 'w') as f:
+                with open (f'./val_accu_{model_type}.txt', 'w') as f:
                     for i in self.val_accu_list:
                         f.write(str(i)+ '\n')
     def accu(self, pred, y):
