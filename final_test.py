@@ -17,7 +17,7 @@ import torchvision
 from torchvision import datasets, models, transforms
 
 
-from transformers import BertForSequenceClassification
+from transformers import BertForSequenceClassification, BertForNextSentencePrediction
 from transformers import BertModel, BertTokenizer
 
 pre_trained_model_name = 'bert-base-uncased'
@@ -27,10 +27,10 @@ num_epochs = 3
 batch_size = 1
 lr = 1e-4
 
-model_name = 'bert_model_1e-05_5_F3_lower'
-device = 1
+model_name = 'bert_model_1e-05_10_F3_lower_1216_SC_adamw_1e-05_torch_dict'
+device = 0
 
-
+TEST_BATCH = 5
 
 
 class DialogueDataset(Dataset):
@@ -222,7 +222,7 @@ class bert_model():
 
     
     def predict(self, test_data):
-        test_batch_size = 1
+        test_batch_size = TEST_BATCH
         ans = []
         if self.gpu:
             self.model = self.model.cuda(device)
@@ -263,15 +263,16 @@ def main(argv, arc):
 
 
     # first way
-    with open(f'./model/{model_name}', 'rb') as input_model:
-        model = pickle.load(input_model)
+    # with open(f'./model/{model_name}', 'rb') as input_model:
+    #     model = pickle.load(input_model)
 
     # second way
     NUM_LABELS = 2
     
-    # model = bert_model()
-    # model.model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
-    # model.model.load_state_dict(torch.load('./model/bert_model_1e-05_5_F3_lower_torch_dict', map_location= f'cuda:{device}'))
+    model = bert_model()
+    model.model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
+    # model.model = BertForNextSentencePrediction.from_pretrained(pre_trained_model_name)
+    model.model.load_state_dict(torch.load('./model/bert_model_1e-05_4_lower_0102_SC_adamw_f3_valepo1_A300_torch_dict_tuned_val', map_location= f'cuda:{device}'))
     print(model.val_accu_list)
 
     preds = model.predict(testset)

@@ -23,14 +23,18 @@ from transformers import WarmupLinearSchedule as get_linear_schedule_with_warmup
 
 
 pre_trained_model_name = 'bert-base-uncased'
-num_epochs = 10
-batch_size = 16
+# pre_trained_model_name = 'bert-large-uncased'
+num_epochs = 4
+batch_size = 8
 lr = 1e-5
 device = 1
+false_num = 3
+val_fine_tuned_epo = 1
 
-model_type = 'SC_adamw'
+length_sentence_A = 300
+model_type = f'SC_adamw_f{false_num}_valepo{val_fine_tuned_epo}_A{length_sentence_A}'
 
-model_name = f'bert_model_{lr}_{num_epochs}_F3_lower_1216_{model_type}_{lr}'
+model_name = f'bert_model_{lr}_{num_epochs}_lower_0103_{model_type}'
 
 
 
@@ -38,11 +42,11 @@ model_name = f'bert_model_{lr}_{num_epochs}_F3_lower_1216_{model_type}_{lr}'
 
 class DialogueDataset(Dataset):
     def __init__(self, df, mode , tokenizer):
-        assert mode in ["train", "test"]  # 一般訓練你會需要 dev set
+        assert mode in ["train", "test"]  # 
         self.mode = mode
         self.df = df
         self.len = len(self.df)
-        self.tokenizer = tokenizer  # 我們將使用 BERT tokenizer
+        self.tokenizer = tokenizer  # transformer 中的 BERT tokenizer
     
     def __getitem__(self, idx):
         if self.mode == "test":
@@ -52,7 +56,7 @@ class DialogueDataset(Dataset):
             text_a, text_b, label = self.df.iloc[idx, :].values
             label_tensor = torch.tensor(label)
             
-        # 建立第一個句子的 BERT tokens 並加入分隔符號 [SEP]
+        # 將第一句 tokenize 後加入，並在最後補上分隔符號 [SEP]
         word_pieces = ["[CLS]"]
         tokens_a = self.tokenizer.tokenize(text_a)
         word_pieces += tokens_a + ["[SEP]"]
@@ -63,13 +67,12 @@ class DialogueDataset(Dataset):
         word_pieces += tokens_b + ["[SEP]"]
         len_b = len(word_pieces) - len_a
         
-        # 將整個 token 序列轉換成索引序列
+        # 將整個 token 序列轉換成索引序列，將 tokens 轉成 token id 
         ids = self.tokenizer.convert_tokens_to_ids(word_pieces)
         tokens_tensor = torch.tensor(ids)
         
         # 將第一句包含 [SEP] 的 token 位置設為 0，其他為 1 表示第二句
-        segments_tensor = torch.tensor([0] * len_a + [1] * len_b, 
-                                        dtype=torch.long)
+        segments_tensor = torch.tensor([0] * len_a + [1] * len_b, dtype=torch.long)
         
         return (tokens_tensor, segments_tensor, label_tensor)
     
@@ -113,16 +116,20 @@ class bert_model():
         return tokens_tensors, segments_tensors, masks_tensors, label_ids
         
     
-    def fit_and_train(self, train_df, val_df, require_grad):
+    def fit_and_train(self, train_df, val_df, val_train_df, require_grad):
 
         NUM_LABELS = 2
         max_value = 0
-        val_batch_size = 10
+        val_batch_size = 8
+        best_model = None
 
         tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name, do_lower_case=True)
        
         trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
         trainloader = DataLoader(trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
+
+        val_trainset = DialogueDataset(val_train_df, "train", tokenizer=tokenizer)
+        val_trainloader = DataLoader(val_trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
 
         
         valset = DialogueDataset(val_df, 'test', tokenizer = tokenizer)
@@ -151,7 +158,7 @@ class bert_model():
             total_steps = len(trainloader) * self.epoch
 
             # Create the learning rate scheduler.
-            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 0, t_total = total_steps)
+            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 100, t_total = total_steps)
 
             for data in trainloader:
                 if self.gpu:
@@ -160,6 +167,12 @@ class bert_model():
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
+                # NSP
+                # outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors,)
+                # loss_f = nn.CrossEntropyLoss()
+                # loss = loss_f(outputs[0], labels)
+                # loss.backward()
+
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
    # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
 
@@ -241,13 +254,62 @@ class bert_model():
                 if val_accu >= max_value:
                     max_value = val_accu
                     self.model = model
-                    torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
+                    best_model = model
+                    torch.save(model.state_dict(), f'./model/{model_name}_torch_dict') 
                 self.val_accu_list.append(val_accu)
 
                 print(f'Epoch : {epo+1}/{self.epoch}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
                 with open (f'./val_accu_{model_type}.txt', 'w') as f:
                     for i in self.val_accu_list:
                         f.write(str(i)+ '\n')
+
+        ## Eventually fine tuned with validation data
+
+        for epo in range(val_fine_tuned_epo):
+            total = 0
+            total_loss = 0
+
+            optimizer = AdamW(best_model.parameters(),
+                  lr = self.lr, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
+                )
+            total_steps = len(val_trainloader) * 1
+            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 10, t_total = total_steps)
+
+            for data in val_trainloader:
+                if self.gpu:
+                    tokens_tensors, segments_tensors, \
+                    masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
+                else:
+                    tokens_tensors, segments_tensors, \
+                    masks_tensors, labels = [x for x in data]
+
+                 # NSP
+                # outputs = best_model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors)
+                # loss_f = nn.CrossEntropyLoss()
+                # loss = loss_f(outputs[0], labels)
+                # loss.backward()
+
+                #SC
+                outputs = best_model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
+                loss = outputs [0]
+                loss.backward() 
+
+
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                model.zero_grad()
+
+
+                total += len(tokens_tensors)
+                total_loss += loss.item() * len(tokens_tensors)
+                del data, tokens_tensors, segments_tensors, \
+                    masks_tensors, labels
+
+        # check if fine tune with validation work
+        torch.save(best_model.state_dict(), f'./model/{model_name}_torch_dict_tuned_val') 
+
     def accu(self, pred, y):
         ret = 0
         for i in range(len(pred)):
@@ -305,6 +367,7 @@ class bert_model():
 def main(argv, arc):
     train_path = argv[1]
     val_path = argv[2]
+    val_train_path = argv[3]
 
     train_df = pd.read_csv(train_path, dtype = {'A': 'str', 'B':'str'})
     if 'Unnamed: 0' in train_df.columns:
@@ -314,8 +377,12 @@ def main(argv, arc):
     if 'Unnamed: 0' in val_df.columns:
         val_df = val_df.drop(['Unnamed: 0'], axis =1)
 
+    val_train_df = pd.read_csv(val_train_path, dtype = {'A': 'str', 'B':'str'})
+    if 'Unnamed: 0' in val_train_df.columns:
+        val_train_df = val_train_df.drop(['Unnamed: 0'], axis =1)
+
     model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr)
-    model.fit_and_train(train_df, val_df,require_grad = True)
+    model.fit_and_train(train_df, val_df, val_train_df, require_grad = True)
     with open(f'./model/{model_name}_last_epo', 'wb') as output:
         pickle.dump(model, output)
 
