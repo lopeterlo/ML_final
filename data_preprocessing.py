@@ -6,24 +6,29 @@ import random
 import pickle
 import math
 
-False_num = 1
+False_num = 3
+length_sentence_A = 300
+# length_sentence_A = 'adjusted'
 special_token = "['-\.\!\/_,$%^*()+\"\<>?:-=]+|[+——！，。？?、~@#￥%……&*（）]+"
 
 def check_length(A, B, right_answer = False):
     if right_answer:
         length = len(B)
-        # A = A[-(512 - length):]
-        A_list = A[-100:]
+        # A_list = A[-(512 - length):]
+        A_list = A[-length_sentence_A:]
     else:
         A_list = []
         for i in range(len(B)):
             length = len(B[i])
             # A_list.append(A[-(512 - length):])
-            A_list.append(A[-100:])
+            A_list.append(A[-length_sentence_A:])
     return A_list, B
 
 def preprocessing(category = 'train'):
-    df = pd.read_json(f'./data/{category}.json')
+    if category == 'valid_train':
+        df = pd.read_json(f'./data/valid.json')
+    else:
+        df = pd.read_json(f'./data/{category}.json')
     all_df = pd.DataFrame(columns = ['A', 'B', 'label'])
     
     for j in range(len(df)):
@@ -75,7 +80,7 @@ def preprocessing(category = 'train'):
         input_df = input_df.dropna().reset_index(drop= True)
         all_df = all_df.append(input_df).reset_index(drop= True)
         print(f'finished {j}  / {len(df)} loop', '\r')
-    all_df.to_csv(f'./struc_data/{category}_df_f{false_example_num}_lower_new.csv')
+    all_df.to_csv(f'./struc_data/new_{category}_df_f{false_example_num}_{length_sentence_A}.csv')
 
 
 def preprocessing_test(category = 'test'):
@@ -115,12 +120,13 @@ def preprocessing_test(category = 'test'):
         input_df = input_df.dropna().reset_index(drop= True)
         test_df = test_df.append(input_df).reset_index(drop= True)
         print(f'finished {j} / {len(test)} loop ', end = '\r')
-    test_df.to_csv(f'./struc_data/{category}_df_lower_new.csv', index = False)
+    test_df.to_csv(f'./struc_data/new_{category}_df_{length_sentence_A}.csv', index = False)
 
 def main(argv, arc):
-    # preprocessing('train')
+    preprocessing('train')
+    preprocessing('valid_train')
     preprocessing_test('valid')
-    # preprocessing_test('test')
+    preprocessing_test('test')
 
 if __name__ == '__main__':
     main(sys.argv, len(sys.argv))
