@@ -25,17 +25,19 @@ from transformers import XLNetModel, XLNetTokenizer, XLNetForSequenceClassificat
 
 # pre_trained_model_name = 'bert-base-uncased'
 pre_trained_model_name = 'xlnet-base-cased'
-num_epochs = 5
+num_epochs = 3
 batch_size = 8
 lr = 1e-5
-device = 1
+device = 0
 false_num = 3
 val_fine_tuned_epo = 1
 
 length_sentence_A = 300
+
+date = '0108'
 model_type = f'xlnetSC_f{false_num}_valepo{val_fine_tuned_epo}_A{length_sentence_A}'
 
-model_name = f'xlnet_model_{lr}_{num_epochs}_lower_1229_{model_type}'
+model_name = f'{date}_xlnet_model_{lr}_{num_epochs}_{model_type}'
 
 
 
@@ -58,14 +60,14 @@ class DialogueDataset(Dataset):
             label_tensor = torch.tensor(label)
             
         # 將第一句 tokenize 後加入，並在最後補上分隔符號 [SEP]
-        word_pieces = ["[CLS]"]
+        word_pieces = [""]
         tokens_a = self.tokenizer.tokenize(text_a)
         word_pieces += tokens_a + ["[SEP]"]
         len_a = len(word_pieces)
         
         # 第二個句子的 BERT tokens
         tokens_b = self.tokenizer.tokenize(text_b)
-        word_pieces += tokens_b + ["[SEP]"]
+        word_pieces += tokens_b + ["[SEP]"] + ["[CLS]"]
         len_b = len(word_pieces) - len_a
         
         # 將整個 token 序列轉換成索引序列，將 tokens 轉成 token id 
