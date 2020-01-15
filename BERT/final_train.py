@@ -24,19 +24,19 @@ from transformers import WarmupLinearSchedule as get_linear_schedule_with_warmup
 
 pre_trained_model_name = 'bert-base-uncased'
 # pre_trained_model_name = 'bert-large-uncased'
-num_epochs = 4
-batch_size = 8
-lr = 1e-5
+num_epochs = 1
+batch_size = 10
+lr = 2e-5
 device = 1
-false_num = 3
+false_num = 4
 val_fine_tuned_epo = 1
+date = '0115'
+
 
 length_sentence_A = 300
-model_type = f'SC_adamw_f{false_num}_valepo{val_fine_tuned_epo}_A{length_sentence_A}'
+model_type = f'bertSC_adamw_f{false_num}_valepo{val_fine_tuned_epo}_A{length_sentence_A}'
 
-model_name = f'bert_model_{lr}_{num_epochs}_lower_0103_{model_type}'
-
-
+model_name = f'{date}_bert_model_{lr}_{num_epochs}_lower_{model_type}'
 
 
 
@@ -73,7 +73,7 @@ class DialogueDataset(Dataset):
         
         # 將第一句包含 [SEP] 的 token 位置設為 0，其他為 1 表示第二句
         segments_tensor = torch.tensor([0] * len_a + [1] * len_b, dtype=torch.long)
-        
+
         return (tokens_tensor, segments_tensor, label_tensor)
     
     def __len__(self):
@@ -122,7 +122,6 @@ class bert_model():
         max_value = 0
         val_batch_size = 8
         best_model = None
-
         tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name, do_lower_case=True)
        
         trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
@@ -130,17 +129,11 @@ class bert_model():
 
         val_trainset = DialogueDataset(val_train_df, "train", tokenizer=tokenizer)
         val_trainloader = DataLoader(val_trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
-
         
         valset = DialogueDataset(val_df, 'test', tokenizer = tokenizer)
         valloader = DataLoader(valset, batch_size=val_batch_size, collate_fn=self.create_mini_batch)
         
         model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
-        # model = BertForNextSentencePrediction.from_pretrained(pre_trained_model_name)
-        # model = BertForNextSentencePrediction.from_pretrained(PRETRAINED_MODEL_NAME)
-        # if require_grad:
-        #   for param in model.parameters():
-        #      param.requires_grad = True
         model.train()
 
         if self.gpu:
@@ -167,46 +160,21 @@ class bert_model():
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
-                # NSP
-                # outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors,)
-                # loss_f = nn.CrossEntropyLoss()
-                # loss = loss_f(outputs[0], labels)
-                # loss.backward()
-
+               
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
-   # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-
+                # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
                 loss = outputs [0]
                 loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
-                # opt = torch.optim.Adam(model.parameters(), lr = self.lr)
-                # opt = torch.optim.SGD(model.parameters(), lr=self.lr, momentum=0.9)
-                # opt.step() #update parameter
-                # opt.zero_grad()
-
                 # Clip the norm of the gradients to 1.0.
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 # Update parameters and take a step using the computed gradient
                 optimizer.step()
-
                 # Update the learning rate.
                 scheduler.step()
-
                 # Clear out the gradients (by default they accumulate)
                 model.zero_grad()
-
-
                 total += len(tokens_tensors)
                 total_loss += loss.item() * len(tokens_tensors)
-
-                # outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors)
-                # loss_f = nn.CrossEntropyLoss()
-                # loss = loss_f(outputs[0], labels)
-                # loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
-                # opt = torch.optim.Adam(model.parameters(), lr = self.lr)
-                # opt.step() #update parameter
-                # opt.zero_grad()
-                # total += len(tokens_tensors)
-                # total_loss += loss.item() * len(tokens_tensors)
 
                 del data, tokens_tensors, segments_tensors, \
                     masks_tensors, labels
@@ -248,8 +216,6 @@ class bert_model():
                         pred_id = data.loc[data['prob'].idxmax(),'candidate_id']
                         if data.loc[data['prob'].idxmax(),'ans'] == pred_id:
                             count += 1
-
-
                 val_accu = count / val_len
                 if val_accu >= max_value:
                     max_value = val_accu
@@ -262,9 +228,7 @@ class bert_model():
                 with open (f'./val_accu_{model_type}.txt', 'w') as f:
                     for i in self.val_accu_list:
                         f.write(str(i)+ '\n')
-
         ## Eventually fine tuned with validation data
-
         for epo in range(val_fine_tuned_epo):
             total = 0
             total_loss = 0
@@ -283,25 +247,14 @@ class bert_model():
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
-
-                 # NSP
-                # outputs = best_model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors)
-                # loss_f = nn.CrossEntropyLoss()
-                # loss = loss_f(outputs[0], labels)
-                # loss.backward()
-
                 #SC
                 outputs = best_model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
                 loss = outputs [0]
                 loss.backward() 
-
-
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 scheduler.step()
                 model.zero_grad()
-
-
                 total += len(tokens_tensors)
                 total_loss += loss.item() * len(tokens_tensors)
                 del data, tokens_tensors, segments_tensors, \
@@ -383,8 +336,8 @@ def main(argv, arc):
 
     model = bert_model(epoch = num_epochs, batch_size = batch_size, lr = lr)
     model.fit_and_train(train_df, val_df, val_train_df, require_grad = True)
-    with open(f'./model/{model_name}_last_epo', 'wb') as output:
-        pickle.dump(model, output)
+    # with open(f'./model/{model_name}_last_epo', 'wb') as output:
+    #     pickle.dump(model, output)
 
 if __name__ == '__main__':
     main(sys.argv, len(sys.argv))

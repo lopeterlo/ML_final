@@ -23,11 +23,7 @@ from transformers import BertModel, BertTokenizer
 pre_trained_model_name = 'bert-base-uncased'
 # pre_trained_model_name = 'bert-large-uncased'
 
-num_epochs = 3
-batch_size = 1
-lr = 1e-4
-
-model_name = 'bert_model_1e-05_10_F3_lower_1216_SC_adamw_1e-05_torch_dict'
+model_name = 'bert_model_1e-05_3_lower_1220_SC_adamw_1220_f3_torch_dict_tuned_val'
 device = 0
 
 TEST_BATCH = 5
@@ -110,24 +106,24 @@ class bert_model():
         return tokens_tensors, segments_tensors, masks_tensors, label_ids
         
     
-    def fit_and_train(self, train_df, val_df, require_grad):
+    def fit_and_train(self, train_df, val_df, val_train_df, require_grad):
 
         NUM_LABELS = 2
         max_value = 0
-        tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name)
+        val_batch_size = 8
+        best_model = None
+        tokenizer = BertTokenizer.from_pretrained(pre_trained_model_name, do_lower_case=True)
        
         trainset = DialogueDataset(train_df, "train", tokenizer=tokenizer)
         trainloader = DataLoader(trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
 
-        val_batch_size = 20
+        val_trainset = DialogueDataset(val_train_df, "train", tokenizer=tokenizer)
+        val_trainloader = DataLoader(val_trainset, batch_size=self.batch_size, collate_fn=self.create_mini_batch)
+        
         valset = DialogueDataset(val_df, 'test', tokenizer = tokenizer)
         valloader = DataLoader(valset, batch_size=val_batch_size, collate_fn=self.create_mini_batch)
         
         model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
-        # model = BertForNextSentencePrediction.from_pretrained(PRETRAINED_MODEL_NAME)
-        # if require_grad:
-        #   for param in model.parameters():
-        #      param.requires_grad = True
         model.train()
 
         if self.gpu:
@@ -135,6 +131,18 @@ class bert_model():
         for epo in range(self.epoch):
             total = 0
             total_loss = 0
+            
+            optimizer = AdamW(model.parameters(),
+                  lr = self.lr, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
+                )
+
+            # Total number of training steps is number of batches * number of epochs.
+            total_steps = len(trainloader) * self.epoch
+
+            # Create the learning rate scheduler.
+            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 100, t_total = total_steps)
+
             for data in trainloader:
                 if self.gpu:
                     tokens_tensors, segments_tensors, \
@@ -142,21 +150,32 @@ class bert_model():
                 else:
                     tokens_tensors, segments_tensors, \
                     masks_tensors, labels = [x for x in data]
+               
                 outputs = model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
-   # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
-#   count += self.accu(preds_label, y)
+                # (tensor(0.6968, grad_fn=<NllLossBackward>), tensor([[-0.0359, -0.0432]], grad_fn=<AddmmBackward>))
                 loss = outputs [0]
                 loss.backward() # calculate gradientopt = torch.optim.SGD(model.parameters(), lr=self.lr,  momentum=0.9)
-                opt = torch.optim.Adam(model.parameters(), lr = self.lr)
-                opt.step() #update parameter
-                opt.zero_grad()
+                # Clip the norm of the gradients to 1.0.
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                # Update parameters and take a step using the computed gradient
+                optimizer.step()
+                # Update the learning rate.
+                scheduler.step()
+                # Clear out the gradients (by default they accumulate)
+                model.zero_grad()
                 total += len(tokens_tensors)
                 total_loss += loss.item() * len(tokens_tensors)
+
+                del data, tokens_tensors, segments_tensors, \
+                    masks_tensors, labels
+
                 print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {loss}', end = '\r')
             self.loss_list.append(total_loss / total)
             print(f'Epoch : {epo+1}/{self.epoch} , Training Loss : {self.loss_list[epo]}', end = ',')
 
-            
+            with open (f'./train_loss_{model_type}.txt', 'w') as f:
+                for i in self.loss_list:
+                    f.write(str(i)+ '\n')
 
             model.eval()
             numebr = 0
@@ -187,15 +206,53 @@ class bert_model():
                         pred_id = data.loc[data['prob'].idxmax(),'candidate_id']
                         if data.loc[data['prob'].idxmax(),'ans'] == pred_id:
                             count += 1
-
-
                 val_accu = count / val_len
                 if val_accu >= max_value:
+                    max_value = val_accu
                     self.model = model
-                    torch.save(model.state_dict(), f'./model/{model_name}_torch_dict')
+                    best_model = model
+                    torch.save(model.state_dict(), f'./model/{model_name}_torch_dict') 
                 self.val_accu_list.append(val_accu)
 
                 print(f'Epoch : {epo+1}/{self.epoch}, Validation Accuracy : {self.val_accu_list[epo]}',end = ',')
+                with open (f'./val_accu_{model_type}.txt', 'w') as f:
+                    for i in self.val_accu_list:
+                        f.write(str(i)+ '\n')
+        ## Eventually fine tuned with validation data
+        for epo in range(val_fine_tuned_epo):
+            total = 0
+            total_loss = 0
+
+            optimizer = AdamW(best_model.parameters(),
+                  lr = self.lr, # args.learning_rate - default is 5e-5, our notebook had 2e-5
+                  eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
+                )
+            total_steps = len(val_trainloader) * 1
+            scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps = 10, t_total = total_steps)
+
+            for data in val_trainloader:
+                if self.gpu:
+                    tokens_tensors, segments_tensors, \
+                    masks_tensors, labels = [x.type(torch.LongTensor).cuda(device) for x in data]
+                else:
+                    tokens_tensors, segments_tensors, \
+                    masks_tensors, labels = [x for x in data]
+                #SC
+                outputs = best_model(input_ids=tokens_tensors, token_type_ids=segments_tensors, attention_mask=masks_tensors, labels=labels)
+                loss = outputs [0]
+                loss.backward() 
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                model.zero_grad()
+                total += len(tokens_tensors)
+                total_loss += loss.item() * len(tokens_tensors)
+                del data, tokens_tensors, segments_tensors, \
+                    masks_tensors, labels
+
+        # check if fine tune with validation work
+        torch.save(best_model.state_dict(), f'./model/{model_name}_torch_dict_tuned_val') 
+
     
     def accu(self, pred, y):
         ret = 0
@@ -272,7 +329,7 @@ def main(argv, arc):
     model = bert_model()
     model.model = BertForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels=NUM_LABELS)
     # model.model = BertForNextSentencePrediction.from_pretrained(pre_trained_model_name)
-    model.model.load_state_dict(torch.load('./model/bert_model_1e-05_4_lower_0102_SC_adamw_f3_valepo1_A300_torch_dict_tuned_val', map_location= f'cuda:{device}'))
+    model.model.load_state_dict(torch.load(f'./model/{model_name}', map_location= f'cuda:{device}'))
     print(model.val_accu_list)
 
     preds = model.predict(testset)
@@ -286,9 +343,7 @@ def main(argv, arc):
             ans.append(data.loc[data['prob'].idxmax(),'B'])
 
     pred_df = pd.DataFrame()
-    # pred_df['id'] = [f'{i}' for i in range(80000,82000)]
     pred_df['id'] = [f'{80000 + i}' for i in range(0, len(ans))]
-    # pred_df['id'] = [82000]
     pred_df['candidate-id'] = ans
     pred_df.to_csv(output_path, index = False)
 
