@@ -41,10 +41,10 @@ This will directly download preprocessed data with last sentence length 300, fal
 ### Fine-tuning with Bert pretrained model:
 
 ```
-bash train.sh [train_data] [valid_data] [valid_train]
+bash ./BERT/train.sh [train_data] [valid_data] [valid_train]
 ```
 
 ### Testing:
 ```
-bash [test_data] [output]
+bash ./BERT/test.sh [test_data] [output]
 ```
