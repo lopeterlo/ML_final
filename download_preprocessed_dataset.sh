@@ -1,1 +1,1 @@
-wget https://www.dropbox.com/s/7emra74vi5fej8i/preprocessed_data.zip?dl=1 ./struct_data/preprocessed_data.zip
+wget https://www.dropbox.com/s/7emra74vi5fej8i/preprocessed_data.zip?dl=1 -O ./struct_data/preprocessed_data.zip
