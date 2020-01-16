@@ -38,7 +38,7 @@ def main(argv, arc):
     model = xlnet_model()
     model.model = XLNetForSequenceClassification.from_pretrained(pre_trained_model_name, num_labels = NUM_LABELS)
     # model.model = BertForNextSentencePrediction.from_pretrained(pre_trained_model_name)
-    model.model.load_state_dict(torch.load('./model/bert_model_2e-05_3_lower_1226_SC_adamw_f3_valepo1_A300_torch_dict_tuned_val', map_location= f'cuda:{device}'))
+    model.model.load_state_dict(torch.load(f'{model_name}', map_location= f'cuda:{device}'))
     print(model.val_accu_list)
 
     preds = model.predict(testset)
