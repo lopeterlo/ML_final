@@ -46,5 +46,5 @@ bash ./BERT/train.sh [train_data] [valid_data] [valid_train]
 
 ### Testing:
 ```
-bash ./BERT/test.sh [test_data] [output]
+bash ./BERT/test.sh [test_data] [model_path] [output]
 ```
