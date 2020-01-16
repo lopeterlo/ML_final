@@ -48,6 +48,10 @@ bash ./BERT/train.sh [train_data] [valid_data] [valid_train]
 ```
 bash ./BERT/test.sh [test_data] [model_path] [output]
 ```
+(Download fine tuned Bert model)
+```
+bash ./download_fine_tune_BERT.sh
+```
 ### Config file:
 If you want to adjust hyperparameter or change cuda device id, please modify config.py.
 
