@@ -1,0 +1,1 @@
+wget https://www.dropbox.com/s/3siy75zskag6bv1/bertSC_f3_torch_dict?dl=1 ./BERT/model/best_model
