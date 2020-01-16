@@ -48,3 +48,19 @@ bash ./BERT/train.sh [train_data] [valid_data] [valid_train]
 ```
 bash ./BERT/test.sh [test_data] [model_path] [output]
 ```
+### Config file:
+If you want to adjust hyperparameter or change cuda device id, please modify config.py.
+
+```
+(config.py)
+pre_trained_model_name = 'bert-base-cased'
+num_epochs = 1
+batch_size = 10
+lr = 1e-5
+device = 1
+false_num = 3
+val_fine_tuned_epo = 1
+length_sentence_A = 300
+TEST_BATCH_SIZE = 5
+
+```
