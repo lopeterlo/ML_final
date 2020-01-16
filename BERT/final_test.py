@@ -8,11 +8,10 @@ from transformers import BertModel, BertTokenizer, AdamW
 
 from final_common import DialogueDataset, bert_model
 from config import  pre_trained_model_name
-
 from config import device
 
 def main(argv, arc):
-    assert len(argv) == 4, 'test_data, output_path, model_path '
+    assert len(argv) == 4, 'input should be :test_data, output_path, model_path '
     test_path = argv[1]
     model_name = argv[2]
     output_path = argv[3]
